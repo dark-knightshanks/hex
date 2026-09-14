@@ -1,7 +1,54 @@
 use colored::*;
-use rustyline::DefaultEditor;
+use std::borrow::Cow;                                                                                                                       
+use rustyline::highlight::Highlighter;      
+use rustyline::completion::FilenameCompleter;                                                                                    
+use rustyline::hint::HistoryHinter;                                                                                                         
+use rustyline::validate::MatchingBracketValidator;  
 use rustyline::error::ReadlineError;
+use rustyline::history::DefaultHistory;    
+use rustyline::{Completer, CompletionType, Config, Editor, Helper, Hinter, Validator};
 use std::process::{Command, Stdio};
+
+impl Highlighter for MyHelper {                                                                                                             
+    fn highlight<'l>(&self, line: &'l str, _pos: usize) -> Cow<'l, str> {                                                                   
+            // If line is empty, do nothing                                                                                                     
+            if line.is_empty() {                                                                                                                
+                return Cow::Borrowed(line);                                                                                                     
+            }                                                                                                                                   
+                                                                                                                                                
+            // Split at the first space to isolate the command name
+            if let Some(space_idx) = line.find(' ') {
+                let command = &line[..space_idx];
+                let rest = &line[space_idx..];
+                
+                // Highlight ONLY the command in green, keep arguments normal
+                let colored_line = format!("{}{}", command.bright_blue().bold(), rest);
+                Cow::Owned(colored_line)
+            } else {
+                // Only a single word has been typed so far -> color it green
+                let colored_line = format!("{}", line.bright_blue().bold());
+                Cow::Owned(colored_line)
+            }
+        }
+  
+        fn highlight_char(&self, _line: &str, _pos: usize, _forced: bool) -> bool {
+            true
+        }
+}
+
+
+#[derive(Helper, Completer, Hinter, Validator)]
+struct MyHelper {
+    #[rustyline(Completer)]
+    completer: FilenameCompleter,
+
+    #[rustyline(Hinter)]
+    hinter: HistoryHinter,
+  
+    #[rustyline(Validator)]
+    validator: MatchingBracketValidator,
+
+}
 
 enum ExecutionResult {
     Success,
@@ -162,10 +209,19 @@ fn execute_piped_command(input: &str) -> ExecutionResult {
 }
 
 fn main() {
-    let mut rl = DefaultEditor::new().unwrap();
+    let config = Config::builder()
+        .completion_type(CompletionType::List)
+        .build();
 
+    let mut rl = Editor::<MyHelper, DefaultHistory>::with_config(config).unwrap();
+    let helper = MyHelper {
+        completer: FilenameCompleter::new(),
+        hinter: HistoryHinter {},
+        validator: MatchingBracketValidator::new(),
+    };
+    rl.set_helper(Some(helper));
     let history_file = ".hex_history";
-    let _ = rl.load_history(history_file);
+    let _ = rl.save_history(history_file);
 
     println!("{}", "Welcome to Hex".bright_green().bold());
     println!("{}", "Type 'exit' or press Ctrl+D to quit.\n".dimmed());
