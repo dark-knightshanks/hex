@@ -9,7 +9,9 @@ A simple Unix shell built in Rust as a learning project to understand systems pr
 - Built-ins: `cd`, `pwd`, `exit`
 - External command execution via `$PATH` (`ls`, `git`, `cat`, etc.)
 - Basic piping (`cmd1 | cmd2`)
-- Colored prompt and error messages (via `colored`)
+- Command chaining with short-circuiting (`cmd1 && cmd2`)
+- Execution timer for commands taking >= 100ms (`[took 2.00s]`)
+- Colored prompt showing current working directory and colored error messages (via `colored`)
 
 ## How to Run
 
@@ -26,6 +28,13 @@ cargo run
 /home/hex >> ls | grep Cargo
 Cargo.lock
 Cargo.toml
+
+/home/hex >> echo "Step 1" && echo "Step 2"
+Step 1
+Step 2
+
+/home/hex >> sleep 2
+[took 2.00s]
 
 /home/hex >> cd src
 /home/hex/src >> pwd
