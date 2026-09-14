@@ -9,6 +9,20 @@ enum ExecutionResult {
     Exit,
 }
 
+fn get_git_branch() -> Option<String> {
+    let output = Command::new("git")
+        .args(["branch", "--show-current"])
+        .output()
+        .ok()?;
+    if output.status.success() {
+        let branch = String::from_utf8_lossy(&output.stdout).trim().to_string();
+        if !branch.is_empty() {
+            return Some(branch);
+        }
+    }
+    return None;
+}
+
 fn execute_single_command(input: &str) -> ExecutionResult {
     let trimmed = input.trim();
     if trimmed.is_empty() {
@@ -160,9 +174,14 @@ fn main() {
         let current_dir = std::env::current_dir()
             .map(|p| p.display().to_string())
             .unwrap_or_else(|_| "?".to_string());
+        let git_info = match get_git_branch() {
+            Some(branch) => format!("(git: {})", branch).green().bold(),
+            None => "".normal(),
+        };
         let prompt = format!(
-            "{}{} ",
+            "{}{}{} ",
             current_dir.cyan().bold(),
+            git_info,
             " >>".bright_yellow().bold()
         );
 
