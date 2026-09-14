@@ -70,7 +70,11 @@ fn execute_single_command(input: &str) -> ExecutionResult {
                 }
             },
             Err(_) => {
-                eprintln!("{}: command not found: {}", "hex".red().bold(), command.bright_white());
+                eprintln!(
+                    "{}: command not found: {}",
+                    "hex".red().bold(),
+                    command.bright_white()
+                );
                 ExecutionResult::Failure
             }
         },
@@ -80,7 +84,10 @@ fn execute_single_command(input: &str) -> ExecutionResult {
 fn execute_piped_command(input: &str) -> ExecutionResult {
     let commands: Vec<&str> = input.split('|').collect();
     if commands.len() != 2 {
-        eprintln!("{}: only single pipe '|' is supported", "pipe error".red().bold());
+        eprintln!(
+            "{}: only single pipe '|' is supported",
+            "pipe error".red().bold()
+        );
         return ExecutionResult::Failure;
     }
     let left: Vec<&str> = commands[0].split_whitespace().collect();
@@ -96,7 +103,12 @@ fn execute_piped_command(input: &str) -> ExecutionResult {
     {
         Ok(child) => child,
         Err(e) => {
-            eprintln!("{}: failed to start '{}': {}", "pipe error".red().bold(), left[0], e);
+            eprintln!(
+                "{}: failed to start '{}': {}",
+                "pipe error".red().bold(),
+                left[0],
+                e
+            );
             return ExecutionResult::Failure;
         }
     };
@@ -108,7 +120,12 @@ fn execute_piped_command(input: &str) -> ExecutionResult {
         {
             Ok(child) => child,
             Err(e) => {
-                eprintln!("{}: failed to start '{}': {}", "pipe error".red().bold(), right[0], e);
+                eprintln!(
+                    "{}: failed to start '{}': {}",
+                    "pipe error".red().bold(),
+                    right[0],
+                    e
+                );
                 let _ = left_child.wait();
                 return ExecutionResult::Failure;
             }
@@ -143,7 +160,11 @@ fn main() {
         let current_dir = std::env::current_dir()
             .map(|p| p.display().to_string())
             .unwrap_or_else(|_| "?".to_string());
-        let prompt = format!("{}{} ", current_dir.cyan().bold(), " >>".bright_yellow().bold());
+        let prompt = format!(
+            "{}{} ",
+            current_dir.cyan().bold(),
+            " >>".bright_yellow().bold()
+        );
 
         let readline = rl.readline(&prompt);
         match readline {
@@ -154,12 +175,22 @@ fn main() {
                 }
                 let _ = rl.add_history_entry(trimmed);
                 let cmd: Vec<&str> = trimmed.split("&&").collect();
+                let start_time = std::time::Instant::now();
                 for sub_cmd in cmd {
                     match execute_single_command(sub_cmd) {
                         ExecutionResult::Exit => break 'shell_loop,
                         ExecutionResult::Failure => break,
                         ExecutionResult::Success => (),
                     }
+                }
+                let duration = start_time.elapsed();
+                if duration.as_millis() >= 100 {
+                    let formatted_time = if duration.as_secs_f64() >= 1.0 {
+                        format!("{:.2}s", duration.as_secs_f64())
+                    } else {
+                        format!("{}ms", duration.as_millis())
+                    };
+                    println!("{}", format!("[took {}]", formatted_time).dimmed());
                 }
             }
             Err(ReadlineError::Interrupted) => {
