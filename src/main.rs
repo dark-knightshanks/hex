@@ -3,17 +3,91 @@ use rustyline::DefaultEditor;
 use rustyline::error::ReadlineError;
 use std::process::{Command, Stdio};
 
-fn execute_piped_command(input: &str) {
+enum ExecutionResult {
+    Success,
+    Failure,
+    Exit,
+}
+
+fn execute_single_command(input: &str) -> ExecutionResult {
+    let trimmed = input.trim();
+    if trimmed.is_empty() {
+        return ExecutionResult::Success;
+    }
+    if trimmed.contains('|') {
+        return execute_piped_command(trimmed);
+    }
+    let parts: Vec<&str> = trimmed.split_whitespace().collect();
+    let command = parts[0];
+    let args = &parts[1..];
+    match command {
+        "exit" => {
+            println!("{}", "Bye-Bye, See you soon!!".bright_blue().bold());
+            ExecutionResult::Exit
+        }
+        "pwd" => match std::env::current_dir() {
+            Ok(path) => {
+                println!("{}", path.display());
+                ExecutionResult::Success
+            }
+            Err(e) => {
+                eprintln!("{}: {}", "pwd error".red().bold(), e);
+                ExecutionResult::Failure
+            }
+        },
+        "cd" => {
+            let target = match args.get(0) {
+                Some(path_arg) => path_arg.to_string(),
+                None => match std::env::var("HOME") {
+                    Ok(home) => home,
+                    Err(_) => {
+                        eprintln!("{}: HOME directory not set", "cd error".red().bold());
+                        return ExecutionResult::Failure;
+                    }
+                },
+            };
+
+            match std::env::set_current_dir(&target) {
+                Ok(_) => ExecutionResult::Success,
+                Err(e) => {
+                    eprintln!("{}: {}: {}", "cd error".red().bold(), target, e);
+                    ExecutionResult::Failure
+                }
+            }
+        }
+        _ => match std::process::Command::new(command).args(args).spawn() {
+            Ok(mut child) => match child.wait() {
+                Ok(status) => {
+                    if status.success() {
+                        ExecutionResult::Success
+                    } else {
+                        ExecutionResult::Failure
+                    }
+                }
+                Err(e) => {
+                    eprintln!("{}: {}", "error waiting for command".red(), e);
+                    ExecutionResult::Failure
+                }
+            },
+            Err(_) => {
+                eprintln!("{}: command not found: {}", "hex".red().bold(), command.bright_white());
+                ExecutionResult::Failure
+            }
+        },
+    }
+}
+
+fn execute_piped_command(input: &str) -> ExecutionResult {
     let commands: Vec<&str> = input.split('|').collect();
     if commands.len() != 2 {
         eprintln!("{}: only single pipe '|' is supported", "pipe error".red().bold());
-        return;
+        return ExecutionResult::Failure;
     }
     let left: Vec<&str> = commands[0].split_whitespace().collect();
     let right: Vec<&str> = commands[1].split_whitespace().collect();
     if left.is_empty() || right.is_empty() {
         eprintln!("{}: invalid pipe syntax", "pipe error".red().bold());
-        return;
+        return ExecutionResult::Failure;
     }
     let mut left_child = match Command::new(left[0])
         .args(&left[1..])
@@ -23,7 +97,7 @@ fn execute_piped_command(input: &str) {
         Ok(child) => child,
         Err(e) => {
             eprintln!("{}: failed to start '{}': {}", "pipe error".red().bold(), left[0], e);
-            return;
+            return ExecutionResult::Failure;
         }
     };
     if let Some(left_stdout) = left_child.stdout.take() {
@@ -36,12 +110,24 @@ fn execute_piped_command(input: &str) {
             Err(e) => {
                 eprintln!("{}: failed to start '{}': {}", "pipe error".red().bold(), right[0], e);
                 let _ = left_child.wait();
-                return;
+                return ExecutionResult::Failure;
             }
         };
-        let _ = right_child.wait();
+        let status = match right_child.wait() {
+            Ok(s) => {
+                if s.success() {
+                    ExecutionResult::Success
+                } else {
+                    ExecutionResult::Failure
+                }
+            }
+            Err(_) => ExecutionResult::Failure,
+        };
+        let _ = left_child.wait();
+        return status;
     }
     let _ = left_child.wait();
+    ExecutionResult::Failure
 }
 
 fn main() {
@@ -53,7 +139,7 @@ fn main() {
     println!("{}", "Welcome to Hex".bright_green().bold());
     println!("{}", "Type 'exit' or press Ctrl+D to quit.\n".dimmed());
 
-    loop {
+    'shell_loop: loop {
         let current_dir = std::env::current_dir()
             .map(|p| p.display().to_string())
             .unwrap_or_else(|_| "?".to_string());
@@ -67,48 +153,13 @@ fn main() {
                     continue;
                 }
                 let _ = rl.add_history_entry(trimmed);
-                if trimmed.contains('|') {
-                    execute_piped_command(trimmed);
-                    continue;
-                }
-                let parts: Vec<&str> = trimmed.split_whitespace().collect();
-                let command = parts[0];
-                let args = &parts[1..];
-                match command {
-                    "exit" => {
-                        println!("{}", "Bye-Bye, See you soon!!".bright_blue().bold());
-                        break;
+                let cmd: Vec<&str> = trimmed.split("&&").collect();
+                for sub_cmd in cmd {
+                    match execute_single_command(sub_cmd) {
+                        ExecutionResult::Exit => break 'shell_loop,
+                        ExecutionResult::Failure => break,
+                        ExecutionResult::Success => (),
                     }
-                    "pwd" => match std::env::current_dir() {
-                        Ok(path) => println!("{}", path.display()),
-                        Err(e) => eprintln!("{}: {}", "pwd error".red().bold(), e),
-                    },
-                    "cd" => {
-                        let target = match args.get(0) {
-                            Some(path_arg) => path_arg.to_string(),
-                            None => match std::env::var("HOME") {
-                                Ok(home) => home,
-                                Err(_) => {
-                                    eprintln!("{}: HOME directory not set", "cd error".red().bold());
-                                    continue;
-                                }
-                            },
-                        };
-
-                        if let Err(e) = std::env::set_current_dir(&target) {
-                            eprintln!("{}: {}: {}", "cd error".red().bold(), target, e);
-                        }
-                    }
-                    _ => match std::process::Command::new(command).args(args).spawn() {
-                        Ok(mut child) => {
-                            if let Err(e) = child.wait() {
-                                eprintln!("{}: {}", "error waiting for command".red(), e);
-                            }
-                        }
-                        Err(_) => {
-                            eprintln!("{}: command not found: {}", "hex".red().bold(), command.bright_white());
-                        }
-                    },
                 }
             }
             Err(ReadlineError::Interrupted) => {
@@ -117,14 +168,14 @@ fn main() {
             }
             Err(ReadlineError::Eof) => {
                 println!("{}", "exit".dimmed());
-                break;
+                break 'shell_loop;
             }
             Err(err) => {
                 eprintln!("{}: {:?}", "Error".red().bold(), err);
                 break;
             }
         }
-    }
 
-    let _ = rl.save_history(history_file);
+        let _ = rl.save_history(history_file);
+    }
 }
